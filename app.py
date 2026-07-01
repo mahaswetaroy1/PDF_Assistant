@@ -47,14 +47,42 @@ def find_top_chunks(question_embeddings, embeddings, chunks, top_n = 3):
     scores.sort(key=lambda x:x[0], reverse =True)
     return [chunk for score, chunk in scores[:top_n]]
 
+st.set_page_config(
+    page_title="PDF Assistant",
+    page_icon="📄",
+    layout="centered"
+)
+
 st.title("PDF Assistant")
+st.caption("Upload a PDF and ask questions — answers are grounded only in your document.")
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
 uploaded_file = st.file_uploader("Upload you PDF file here", type = "pdf")
 if uploaded_file is not None:
     with st.spinner("Processing PDF....."):
-        chunks, embeddings = process_pdf(uploaded_file)
-    st.success(f"Ready! {len(chunks)} chunks processed")
+        try:
+            chunks, embeddings = process_pdf(uploaded_file)
+            if len(chunks)==0:
+                st.error("Could not extract text from this PDF. Try a different file")
+            else:
+                st.success(f"Ready! {len(chunks)} chunks processed")
+        except Exception as e:
+            st.error(f"Failed to process PDF: {str(e)}")
+        
+    for message in st.session_state.history:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+                if message["role"] == "assistant" and "sources" in message:
+                    with st.expander ("View Sources"):
+                        for i, chunk in enumerate(message["sources"]):
+                            st.markdown(f"**Source {i+1}:**")
+                            st.write(chunk)
+                            st.divider()
+        
 
-    with st.form("question_form"):
+    with st.form("question_form", clear_on_submit = True):
         question = st.text_input("Ask a question about the document")
         submitted = st.form_submit_button("Ask")
 
@@ -71,14 +99,30 @@ if uploaded_file is not None:
             Question:{question}
             """
 
-            response = client.messages.create(
-                model = "claude-sonnet-4-6",
-                max_tokens = 1024,
-                messages = [
-                    {"role":"user", "content": prompt}
-                ]
-            )
-            st.markdown(response.content[0].text)
+            try:
+                with st.spinner("Thinking..."):
+                    response = client.messages.create(
+                    model = "claude-sonnet-4-6",
+                    max_tokens = 1024,
+                    messages = [
+                     {"role":"user", "content": prompt}
+                    ]
+                    )
+                #st.markdown(response.content[0].text)
+                st.session_state.history.append({"role": "user", "content": question})
+                st.session_state.history.append({
+                    "role": "assistant", 
+                    "content": response.content[0].text,
+                    "sources": top_chunks
+                })
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Something went wrong: {str(e)}")
+                
+                
+        
+
 
 
 
